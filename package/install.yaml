@@ -1,0 +1,998 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: capa-eni-controller
+    control-plane: controller-manager
+  name: capa-eni-controller-system
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.21.0
+  name: eniclaims.networking.dcn.ssu.ac.kr
+spec:
+  group: networking.dcn.ssu.ac.kr
+  names:
+    kind: ENIClaim
+    listKind: ENIClaimList
+    plural: eniclaims
+    singular: eniclaim
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.eniID
+      name: ENI
+      type: string
+    - jsonPath: .spec.machineRef.name
+      name: Machine
+      type: string
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: ENIClaim is the Schema for the eniclaims API
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: spec defines the desired state of ENIClaim
+            properties:
+              eniID:
+                description: ENIID is the interface reserved by this claim. Its value
+                  is immutable.
+                pattern: ^eni-[0-9a-f]+$
+                type: string
+                x-kubernetes-validations:
+                - message: eniID is immutable
+                  rule: self == oldSelf
+              machineRef:
+                description: NamespacedObjectReference identifies a Kubernetes object
+                  without coupling the API to a concrete kind.
+                properties:
+                  name:
+                    type: string
+                  namespace:
+                    type: string
+                required:
+                - name
+                - namespace
+                type: object
+              poolRef:
+                properties:
+                  name:
+                    minLength: 1
+                    type: string
+                required:
+                - name
+                type: object
+            required:
+            - eniID
+            - machineRef
+            - poolRef
+            type: object
+          status:
+            description: status defines the observed state of ENIClaim
+            properties:
+              conditions:
+                description: |-
+                  conditions represent the current state of the ENIClaim resource.
+                  Each condition has a unique type and reflects the status of a specific aspect of the resource.
+
+                  Standard condition types include:
+                  - "Available": the resource is fully functional
+                  - "Progressing": the resource is being created or updated
+                  - "Degraded": the resource failed to reach or maintain its desired state
+
+                  The status of each condition is one of True, False, or Unknown.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              phase:
+                type: string
+              privateIP:
+                type: string
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.21.0
+  name: enipools.networking.dcn.ssu.ac.kr
+spec:
+  group: networking.dcn.ssu.ac.kr
+  names:
+    kind: ENIPool
+    listKind: ENIPoolList
+    plural: enipools
+    singular: enipool
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.region
+      name: Region
+      type: string
+    - jsonPath: .spec.vpcID
+      name: VPC
+      type: string
+    - jsonPath: .spec.exhaustionPolicy
+      name: Policy
+      type: string
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: ENIPool is the Schema for the enipools API
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: spec defines the desired state of ENIPool
+            properties:
+              exhaustionPolicy:
+                default: Dynamic
+                description: ExhaustionPolicy controls behavior when no eligible ENI
+                  remains.
+                enum:
+                - Dynamic
+                - Wait
+                - Fail
+                type: string
+              interfaces:
+                description: Interfaces is the operator-managed set of pre-created
+                  ENIs and their expected primary IPv4 addresses.
+                items:
+                  description: ENIReference identifies an ENI and pins its expected
+                    primary private IPv4 address.
+                  properties:
+                    id:
+                      description: ID is the AWS network interface ID.
+                      pattern: ^eni-[0-9a-f]+$
+                      type: string
+                    privateIP:
+                      description: PrivateIP is the expected primary private IPv4
+                        address of the ENI.
+                      format: ipv4
+                      type: string
+                  required:
+                  - id
+                  - privateIP
+                  type: object
+                minItems: 1
+                type: array
+              region:
+                description: Region is the AWS region containing every ENI in this
+                  pool.
+                minLength: 1
+                type: string
+              vpcID:
+                description: VPCID is the VPC containing every ENI in this pool.
+                pattern: ^vpc-[0-9a-f]+$
+                type: string
+            required:
+            - interfaces
+            - region
+            - vpcID
+            type: object
+          status:
+            description: status defines the observed state of ENIPool
+            properties:
+              conditions:
+                description: |-
+                  conditions represent the current state of the ENIPool resource.
+                  Each condition has a unique type and reflects the status of a specific aspect of the resource.
+
+                  Standard condition types include:
+                  - "Available": the resource is fully functional
+                  - "Progressing": the resource is being created or updated
+                  - "Degraded": the resource failed to reach or maintain its desired state
+
+                  The status of each condition is one of True, False, or Unknown.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              interfaces:
+                items:
+                  description: ENIObservation contains AWS-discovered data. AZ and
+                    subnet are never user inputs.
+                  properties:
+                    availabilityZone:
+                      type: string
+                    claimRef:
+                      description: NamespacedObjectReference identifies a Kubernetes
+                        object without coupling the API to a concrete kind.
+                      properties:
+                        name:
+                          type: string
+                        namespace:
+                          type: string
+                      required:
+                      - name
+                      - namespace
+                      type: object
+                    id:
+                      type: string
+                    message:
+                      type: string
+                    privateIP:
+                      type: string
+                    state:
+                      description: ENIState is the observed allocation state of an
+                        interface.
+                      type: string
+                    subnetID:
+                      type: string
+                  required:
+                  - id
+                  - state
+                  type: object
+                type: array
+              observedGeneration:
+                format: int64
+                type: integer
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: capa-eni-controller
+  name: capa-eni-controller-controller-manager
+  namespace: capa-eni-controller-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: capa-eni-controller
+  name: capa-eni-controller-leader-election-role
+  namespace: capa-eni-controller-system
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - configmaps
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+- apiGroups:
+  - coordination.k8s.io
+  resources:
+  - leases
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+- apiGroups:
+  - ""
+  resources:
+  - events
+  verbs:
+  - create
+  - patch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: capa-eni-controller
+  name: capa-eni-controller-eniclaim-admin-role
+rules:
+- apiGroups:
+  - networking.dcn.ssu.ac.kr
+  resources:
+  - eniclaims
+  verbs:
+  - '*'
+- apiGroups:
+  - networking.dcn.ssu.ac.kr
+  resources:
+  - eniclaims/status
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: capa-eni-controller
+  name: capa-eni-controller-eniclaim-editor-role
+rules:
+- apiGroups:
+  - networking.dcn.ssu.ac.kr
+  resources:
+  - eniclaims
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - networking.dcn.ssu.ac.kr
+  resources:
+  - eniclaims/status
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: capa-eni-controller
+  name: capa-eni-controller-eniclaim-viewer-role
+rules:
+- apiGroups:
+  - networking.dcn.ssu.ac.kr
+  resources:
+  - eniclaims
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - networking.dcn.ssu.ac.kr
+  resources:
+  - eniclaims/status
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: capa-eni-controller
+  name: capa-eni-controller-enipool-admin-role
+rules:
+- apiGroups:
+  - networking.dcn.ssu.ac.kr
+  resources:
+  - enipools
+  verbs:
+  - '*'
+- apiGroups:
+  - networking.dcn.ssu.ac.kr
+  resources:
+  - enipools/status
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: capa-eni-controller
+  name: capa-eni-controller-enipool-editor-role
+rules:
+- apiGroups:
+  - networking.dcn.ssu.ac.kr
+  resources:
+  - enipools
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - networking.dcn.ssu.ac.kr
+  resources:
+  - enipools/status
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: capa-eni-controller
+  name: capa-eni-controller-enipool-viewer-role
+rules:
+- apiGroups:
+  - networking.dcn.ssu.ac.kr
+  resources:
+  - enipools
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - networking.dcn.ssu.ac.kr
+  resources:
+  - enipools/status
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: capa-eni-controller-manager-role
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - events
+  verbs:
+  - create
+  - patch
+- apiGroups:
+  - cluster.x-k8s.io
+  resources:
+  - clusters
+  - machines
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - infrastructure.cluster.x-k8s.io
+  resources:
+  - awsclusters
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - infrastructure.cluster.x-k8s.io
+  resources:
+  - awsmachines
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - infrastructure.cluster.x-k8s.io
+  resources:
+  - awsmachines/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - infrastructure.cluster.x-k8s.io
+  resources:
+  - awsmachines/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - networking.dcn.ssu.ac.kr
+  resources:
+  - eniclaims
+  - enipools
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - networking.dcn.ssu.ac.kr
+  resources:
+  - eniclaims/finalizers
+  - enipools/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - networking.dcn.ssu.ac.kr
+  resources:
+  - eniclaims/status
+  - enipools/status
+  verbs:
+  - get
+  - patch
+  - update
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: capa-eni-controller-metrics-auth-role
+rules:
+- apiGroups:
+  - authentication.k8s.io
+  resources:
+  - tokenreviews
+  verbs:
+  - create
+- apiGroups:
+  - authorization.k8s.io
+  resources:
+  - subjectaccessreviews
+  verbs:
+  - create
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: capa-eni-controller-metrics-reader
+rules:
+- nonResourceURLs:
+  - /metrics
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: capa-eni-controller
+  name: capa-eni-controller-leader-election-rolebinding
+  namespace: capa-eni-controller-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: capa-eni-controller-leader-election-role
+subjects:
+- kind: ServiceAccount
+  name: capa-eni-controller-controller-manager
+  namespace: capa-eni-controller-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: capa-eni-controller
+  name: capa-eni-controller-manager-rolebinding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: capa-eni-controller-manager-role
+subjects:
+- kind: ServiceAccount
+  name: capa-eni-controller-controller-manager
+  namespace: capa-eni-controller-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: capa-eni-controller-metrics-auth-rolebinding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: capa-eni-controller-metrics-auth-role
+subjects:
+- kind: ServiceAccount
+  name: capa-eni-controller-controller-manager
+  namespace: capa-eni-controller-system
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: capa-eni-controller
+    control-plane: controller-manager
+  name: capa-eni-controller-controller-manager-metrics-service
+  namespace: capa-eni-controller-system
+spec:
+  ports:
+  - name: https
+    port: 8443
+    protocol: TCP
+    targetPort: 8443
+  selector:
+    app.kubernetes.io/name: capa-eni-controller
+    control-plane: controller-manager
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: capa-eni-controller
+  name: capa-eni-controller-webhook-service
+  namespace: capa-eni-controller-system
+spec:
+  ports:
+  - port: 443
+    protocol: TCP
+    targetPort: 9443
+  selector:
+    app.kubernetes.io/name: capa-eni-controller
+    control-plane: controller-manager
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: capa-eni-controller
+    control-plane: controller-manager
+  name: capa-eni-controller-controller-manager
+  namespace: capa-eni-controller-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: capa-eni-controller
+      control-plane: controller-manager
+  template:
+    metadata:
+      annotations:
+        kubectl.kubernetes.io/default-container: manager
+      labels:
+        app.kubernetes.io/name: capa-eni-controller
+        control-plane: controller-manager
+    spec:
+      containers:
+      - args:
+        - --metrics-bind-address=:8443
+        - --leader-elect
+        - --health-probe-bind-address=:8081
+        - --webhook-cert-path=/tmp/k8s-webhook-server/serving-certs
+        command:
+        - /manager
+        image: ghcr.io/ssu-dcn/capa-eni-controller:v0.1.0
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8081
+          initialDelaySeconds: 15
+          periodSeconds: 20
+        name: manager
+        ports:
+        - containerPort: 8081
+          name: health
+          protocol: TCP
+        - containerPort: 9443
+          name: webhook-server
+          protocol: TCP
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 8081
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        resources:
+          limits:
+            cpu: 500m
+            memory: 128Mi
+          requests:
+            cpu: 10m
+            memory: 64Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: true
+        volumeMounts:
+        - mountPath: /tmp/k8s-webhook-server/serving-certs
+          name: webhook-certs
+          readOnly: true
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      serviceAccountName: capa-eni-controller-controller-manager
+      terminationGracePeriodSeconds: 10
+      volumes:
+      - name: webhook-certs
+        secret:
+          secretName: webhook-server-cert
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: capa-eni-controller
+  name: capa-eni-controller-metrics-certs
+  namespace: capa-eni-controller-system
+spec:
+  dnsNames:
+  - SERVICE_NAME.SERVICE_NAMESPACE.svc
+  - SERVICE_NAME.SERVICE_NAMESPACE.svc.cluster.local
+  issuerRef:
+    kind: Issuer
+    name: capa-eni-controller-selfsigned-issuer
+  secretName: metrics-server-cert
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: capa-eni-controller
+  name: capa-eni-controller-serving-cert
+  namespace: capa-eni-controller-system
+spec:
+  dnsNames:
+  - capa-eni-controller-webhook-service.capa-eni-controller-system.svc
+  - capa-eni-controller-webhook-service.capa-eni-controller-system.svc.cluster.local
+  issuerRef:
+    kind: Issuer
+    name: capa-eni-controller-selfsigned-issuer
+  secretName: webhook-server-cert
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: capa-eni-controller
+  name: capa-eni-controller-selfsigned-issuer
+  namespace: capa-eni-controller-system
+spec:
+  selfSigned: {}
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  annotations:
+    cert-manager.io/inject-ca-from: capa-eni-controller-system/capa-eni-controller-serving-cert
+  name: capa-eni-controller-mutating-webhook-configuration
+webhooks:
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: capa-eni-controller-webhook-service
+      namespace: capa-eni-controller-system
+      path: /mutate-infrastructure-cluster-x-k8s-io-v1beta2-awsmachine
+  failurePolicy: Fail
+  name: mawsmachine-v1beta2.eni.dcn.ssu.ac.kr
+  rules:
+  - apiGroups:
+    - infrastructure.cluster.x-k8s.io
+    apiVersions:
+    - v1beta2
+    operations:
+    - CREATE
+    resources:
+    - awsmachines
+  sideEffects: None
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: capa-eni-controller-webhook-service
+      namespace: capa-eni-controller-system
+      path: /mutate-networking-dcn-ssu-ac-kr-v1alpha1-enipool
+  failurePolicy: Fail
+  name: menipool-v1alpha1.eni.dcn.ssu.ac.kr
+  rules:
+  - apiGroups:
+    - networking.dcn.ssu.ac.kr
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - enipools
+  sideEffects: None
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  annotations:
+    cert-manager.io/inject-ca-from: capa-eni-controller-system/capa-eni-controller-serving-cert
+  name: capa-eni-controller-validating-webhook-configuration
+webhooks:
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: capa-eni-controller-webhook-service
+      namespace: capa-eni-controller-system
+      path: /validate-networking-dcn-ssu-ac-kr-v1alpha1-eniclaim
+  failurePolicy: Fail
+  name: veniclaim-v1alpha1.eni.dcn.ssu.ac.kr
+  rules:
+  - apiGroups:
+    - networking.dcn.ssu.ac.kr
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - eniclaims
+  sideEffects: None
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: capa-eni-controller-webhook-service
+      namespace: capa-eni-controller-system
+      path: /validate-networking-dcn-ssu-ac-kr-v1alpha1-enipool
+  failurePolicy: Fail
+  name: venipool-v1alpha1.eni.dcn.ssu.ac.kr
+  rules:
+  - apiGroups:
+    - networking.dcn.ssu.ac.kr
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - enipools
+  sideEffects: None

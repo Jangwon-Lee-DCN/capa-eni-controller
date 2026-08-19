@@ -1,0 +1,91 @@
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  name: mutating-webhook-configuration
+webhooks:
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: webhook-service
+      namespace: system
+      path: /mutate-infrastructure-cluster-x-k8s-io-v1beta2-awsmachine
+  failurePolicy: Fail
+  name: mawsmachine-v1beta2.eni.dcn.ssu.ac.kr
+  rules:
+  - apiGroups:
+    - infrastructure.cluster.x-k8s.io
+    apiVersions:
+    - v1beta2
+    operations:
+    - CREATE
+    resources:
+    - awsmachines
+  sideEffects: NoneOnDryRun
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: webhook-service
+      namespace: system
+      path: /mutate-networking-dcn-ssu-ac-kr-v1alpha1-enipool
+  failurePolicy: Fail
+  name: menipool-v1alpha1.eni.dcn.ssu.ac.kr
+  rules:
+  - apiGroups:
+    - networking.dcn.ssu.ac.kr
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - enipools
+  sideEffects: None
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: validating-webhook-configuration
+webhooks:
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: webhook-service
+      namespace: system
+      path: /validate-networking-dcn-ssu-ac-kr-v1alpha1-eniclaim
+  failurePolicy: Fail
+  name: veniclaim-v1alpha1.eni.dcn.ssu.ac.kr
+  rules:
+  - apiGroups:
+    - networking.dcn.ssu.ac.kr
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - eniclaims
+  sideEffects: None
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: webhook-service
+      namespace: system
+      path: /validate-networking-dcn-ssu-ac-kr-v1alpha1-enipool
+  failurePolicy: Fail
+  name: venipool-v1alpha1.eni.dcn.ssu.ac.kr
+  rules:
+  - apiGroups:
+    - networking.dcn.ssu.ac.kr
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - enipools
+  sideEffects: None

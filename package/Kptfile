@@ -1,0 +1,10 @@
+apiVersion: kpt.dev/v1
+kind: Kptfile
+metadata:
+  name: capa-eni-controller
+info:
+  description: Install the CAPA ENI pool allocator
+  site: https://github.com/ssu-dcn/capa-eni-controller
+pipeline:
+  mutators: []
+  validators: []

@@ -1,0 +1,16 @@
+apiVersion: networking.dcn.ssu.ac.kr/v1alpha1
+kind: ENIPool
+metadata:
+  labels:
+    app.kubernetes.io/name: capa-eni-controller
+    app.kubernetes.io/managed-by: kustomize
+  name: prod-ap-northeast-2
+spec:
+  region: ap-northeast-2
+  vpcID: vpc-0123456789abcdef0
+  exhaustionPolicy: Dynamic
+  interfaces:
+    - id: eni-00000000000000001
+      privateIP: 10.20.1.25
+    - id: eni-00000000000000002
+      privateIP: 10.20.1.26

@@ -1,0 +1,14 @@
+apiVersion: networking.dcn.ssu.ac.kr/v1alpha1
+kind: ENIClaim
+metadata:
+  labels:
+    app.kubernetes.io/name: capa-eni-controller
+    app.kubernetes.io/managed-by: kustomize
+  name: eni-00000000000000001
+spec:
+  machineRef:
+    namespace: workload-cluster
+    name: worker-abcde
+  poolRef:
+    name: prod-ap-northeast-2
+  eniID: eni-00000000000000001
