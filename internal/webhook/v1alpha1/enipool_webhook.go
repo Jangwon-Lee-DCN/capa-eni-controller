@@ -103,6 +103,7 @@ func (v *ENIPoolCustomValidator) ValidateDelete(_ context.Context, obj *networki
 func (v *ENIPoolCustomValidator) validate(ctx context.Context, obj *networkingv1alpha1.ENIPool) error {
 	wanted := map[string]struct{}{}
 	wantedIPs := map[netip.Addr]struct{}{}
+	wantedKeys := map[string]struct{}{}
 	for _, configured := range obj.Spec.Interfaces {
 		if _, duplicate := wanted[configured.ID]; duplicate {
 			return fmt.Errorf("ENI %s is listed more than once", configured.ID)
@@ -116,6 +117,12 @@ func (v *ENIPoolCustomValidator) validate(ctx context.Context, obj *networkingv1
 			return fmt.Errorf("private IP %s is listed more than once", configured.PrivateIP)
 		}
 		wantedIPs[ip] = struct{}{}
+		if configured.Key != "" {
+			if _, duplicate := wantedKeys[configured.Key]; duplicate {
+				return fmt.Errorf("interface key %q is listed more than once", configured.Key)
+			}
+			wantedKeys[configured.Key] = struct{}{}
+		}
 	}
 	if v.Client == nil {
 		return nil

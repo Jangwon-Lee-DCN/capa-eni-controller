@@ -14,6 +14,7 @@ private IP 할당 방식으로 진행합니다.
 - `AWSMachineTemplate`과 `MachineDeployment`의 표준 생성 흐름 유지
 - 사람이 등록한 ENI 목록을 Region 및 VPC 단위 Pool로 관리
 - 각 `AWSMachine`에 서로 다른 ENI를 안전하게 할당
+- MachineDeployment별 key annotation으로 특정 ENI 선택
 - Pool 고갈 시 CAPA 기본 네트워크 할당으로 자동 fallback
 - Machine 삭제 및 재생성 과정에서 ENI 할당 상태를 일관되게 관리
 
@@ -40,6 +41,24 @@ spec:
 annotation이 없는 템플릿에서 생성된 `AWSMachine`은 Webhook과 allocator의
 처리 대상이 아니며 기존 CAPA 방식으로 생성됩니다.
 
+특정 ENI가 필요하면 Pool interface의 `key`와 같은 값을
+`MachineDeployment.spec.template.metadata.annotations`에 지정합니다. 이 annotation은
+CAPI가 생성하는 `Machine`으로 전파되고 allocator가 소유 Machine에서 읽습니다.
+
+```yaml
+apiVersion: cluster.x-k8s.io/v1beta2
+kind: MachineDeployment
+spec:
+  template:
+    metadata:
+      annotations:
+        eni.dcn.ssu.ac.kr/interface-key: edge-worker-1
+```
+
+같은 annotation을 `AWSMachineTemplate.spec.template.metadata.annotations`에 직접
+설정해도 동작하며, AWSMachine 쪽 값이 Machine 쪽 값보다 우선합니다. key annotation이
+없으면 기존처럼 사용 가능한 ENI 중 private IPv4가 가장 작은 항목을 선택합니다.
+
 ## ENI Pool 예시
 
 사용자는 Pool의 Region, VPC ID, ENI ID와 각 ENI의 primary private IPv4를
@@ -55,9 +74,11 @@ spec:
   vpcID: vpc-0123456789abcdef0
   exhaustionPolicy: Dynamic
   interfaces:
-    - id: eni-00000000000000001
+    - key: core-worker-1
+      id: eni-00000000000000001
       privateIP: 10.20.1.25
-    - id: eni-00000000000000002
+    - key: edge-worker-1
+      id: eni-00000000000000002
       privateIP: 10.20.1.26
 ```
 
@@ -66,6 +87,10 @@ ENI ID, VPC와 primary private IPv4가 정확하다고 가정하며, Claim이 �
 사용 가능하다고 판단합니다. 할당 가능한 ENI는 private IPv4의 숫자값이 작은
 순서로 선택됩니다. AZ와 subnet은 입력하지 않으며, 선택된 ENI가 가진 네트워크
 속성에 맞춰 CAPA와 EC2가 생성을 진행합니다.
+
+`key`는 Pool 안에서 유일해야 합니다. 요청한 key가 Pool에 없으면 AWSMachine CREATE를
+허용하지 않아 오타로 인해 다른 ENI나 동적 IP가 배정되는 것을 방지합니다. 요청한
+ENI가 이미 Claim된 경우에는 Pool의 `exhaustionPolicy`가 적용됩니다.
 
 ## 처리 흐름
 

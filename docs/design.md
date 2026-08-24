@@ -38,6 +38,7 @@ networking.dcn.ssu.ac.kr
 | Key | 대상 | 의미 |
 | --- | --- | --- |
 | `eni.dcn.ssu.ac.kr/allocate-from-pool` | `AWSMachine` | `true`이면 ENI 할당 대상 |
+| `eni.dcn.ssu.ac.kr/interface-key` | `Machine` 또는 `AWSMachine` | 같은 key의 Pool ENI만 선택; AWSMachine 값 우선 |
 | `eni.dcn.ssu.ac.kr/allocation-result` | `AWSMachine` | ENI 주입 성공 시 `Allocated` 기록 |
 
 사용자는 첫 번째 annotation을 `AWSMachineTemplate.spec.template.metadata`에

@@ -89,7 +89,11 @@ func (r *AWSMachineReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	if pool == nil {
 		return r.dynamicFallback(ctx, machine, "NoMatchingPool")
 	}
-	claim, err := r.claimInterface(ctx, machine, pool)
+	interfaceKey, err := r.resolveInterfaceKey(ctx, machine)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	claim, err := r.claimInterface(ctx, machine, pool, interfaceKey)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -169,7 +173,25 @@ func (r *AWSMachineReconciler) findPool(ctx context.Context, region, vpcID strin
 	return match, nil
 }
 
-func (r *AWSMachineReconciler) claimInterface(ctx context.Context, machine *infrastructurev1beta2.AWSMachine, pool *networkingv1alpha1.ENIPool) (*networkingv1alpha1.ENIClaim, error) {
+func (r *AWSMachineReconciler) resolveInterfaceKey(ctx context.Context, awsMachine *infrastructurev1beta2.AWSMachine) (string, error) {
+	if key := awsMachine.Annotations[networkingv1alpha1.InterfaceKeyAnnotation]; key != "" {
+		return key, nil
+	}
+	for _, owner := range awsMachine.OwnerReferences {
+		ownerGroupVersion, err := schema.ParseGroupVersion(owner.APIVersion)
+		if err != nil || owner.Kind != "Machine" || ownerGroupVersion.Group != clusterv1.GroupVersion.Group {
+			continue
+		}
+		machine := &clusterv1.Machine{}
+		if err := r.Get(ctx, client.ObjectKey{Namespace: awsMachine.Namespace, Name: owner.Name}, machine); err != nil {
+			return "", fmt.Errorf("get owner Machine for interface key: %w", err)
+		}
+		return machine.Annotations[networkingv1alpha1.InterfaceKeyAnnotation], nil
+	}
+	return "", nil
+}
+
+func (r *AWSMachineReconciler) claimInterface(ctx context.Context, machine *infrastructurev1beta2.AWSMachine, pool *networkingv1alpha1.ENIPool, interfaceKey string) (*networkingv1alpha1.ENIClaim, error) {
 	claims := &networkingv1alpha1.ENIClaimList{}
 	if err := r.List(ctx, claims); err != nil {
 		return nil, err
@@ -181,6 +203,17 @@ func (r *AWSMachineReconciler) claimInterface(ctx context.Context, machine *infr
 		}
 	}
 	configured := append([]networkingv1alpha1.ENIReference(nil), pool.Spec.Interfaces...)
+	if interfaceKey != "" {
+		configured = configured[:0]
+		for _, candidate := range pool.Spec.Interfaces {
+			if candidate.Key == interfaceKey {
+				configured = append(configured, candidate)
+			}
+		}
+		if len(configured) == 0 {
+			return nil, fmt.Errorf("ENIPool %q has no interface with key %q", pool.Name, interfaceKey)
+		}
+	}
 	sort.Slice(configured, func(i, j int) bool {
 		left, leftErr := netip.ParseAddr(configured[i].PrivateIP)
 		right, rightErr := netip.ParseAddr(configured[j].PrivateIP)

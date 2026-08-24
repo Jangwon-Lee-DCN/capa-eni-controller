@@ -47,6 +47,13 @@ type ENIPoolSpec struct {
 
 // ENIReference identifies an ENI and pins its expected primary private IPv4 address.
 type ENIReference struct {
+	// Key is an optional operator-defined selector used to request this exact ENI.
+	// Keys must be unique within a pool.
+	// +kubebuilder:validation:MaxLength=63
+	// +kubebuilder:validation:Pattern=`^[A-Za-z0-9]([A-Za-z0-9._-]*[A-Za-z0-9])?$`
+	// +optional
+	Key string `json:"key,omitempty"`
+
 	// ID is the AWS network interface ID.
 	// +kubebuilder:validation:Pattern=`^eni-[0-9a-f]+$`
 	ID string `json:"id"`
@@ -79,6 +86,7 @@ const (
 
 // ENIObservation contains AWS-discovered data. AZ and subnet are never user inputs.
 type ENIObservation struct {
+	Key              string                     `json:"key,omitempty"`
 	ID               string                     `json:"id"`
 	AvailabilityZone string                     `json:"availabilityZone,omitempty"`
 	SubnetID         string                     `json:"subnetID,omitempty"`

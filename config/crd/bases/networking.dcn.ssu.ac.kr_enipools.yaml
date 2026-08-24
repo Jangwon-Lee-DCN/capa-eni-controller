@@ -69,6 +69,13 @@ spec:
                       description: ID is the AWS network interface ID.
                       pattern: ^eni-[0-9a-f]+$
                       type: string
+                    key:
+                      description: |-
+                        Key is an optional operator-defined selector used to request this exact ENI.
+                        Keys must be unique within a pool.
+                      maxLength: 63
+                      pattern: ^[A-Za-z0-9]([A-Za-z0-9._-]*[A-Za-z0-9])?$
+                      type: string
                     privateIP:
                       description: PrivateIP is the expected primary private IPv4
                         address of the ENI.
@@ -186,6 +193,8 @@ spec:
                       - namespace
                       type: object
                     id:
+                      type: string
+                    key:
                       type: string
                     message:
                       type: string

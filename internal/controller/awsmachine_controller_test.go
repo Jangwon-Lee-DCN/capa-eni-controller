@@ -35,7 +35,7 @@ import (
 
 var _ = Describe("AWSMachine Controller", func() {
 	Context("When allocating an ENI", func() {
-		It("claims an available ENI and unpauses the AWSMachine", func() {
+		It("claims the ENI selected by the owner Machine annotation and unpauses the AWSMachine", func() {
 			testScheme := runtime.NewScheme()
 			Expect(networkingv1alpha1.AddToScheme(testScheme)).To(Succeed())
 			Expect(clusterv1.AddToScheme(testScheme)).To(Succeed())
@@ -53,7 +53,13 @@ var _ = Describe("AWSMachine Controller", func() {
 					OwnerReferences: []metav1.OwnerReference{{APIVersion: "cluster.x-k8s.io/v1beta2", Kind: "Machine", Name: "worker-abcde"}},
 				},
 			}
-			machine := &clusterv1.Machine{ObjectMeta: metav1.ObjectMeta{Name: "worker-abcde", Namespace: "workload"}, Spec: clusterv1.MachineSpec{ClusterName: "cluster-a"}}
+			machine := &clusterv1.Machine{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "worker-abcde", Namespace: "workload",
+					Annotations: map[string]string{networkingv1alpha1.InterfaceKeyAnnotation: "edge-worker-1"},
+				},
+				Spec: clusterv1.MachineSpec{ClusterName: "cluster-a"},
+			}
 			cluster := &clusterv1.Cluster{
 				ObjectMeta: metav1.ObjectMeta{Name: "cluster-a", Namespace: "workload"},
 				Spec: clusterv1.ClusterSpec{InfrastructureRef: clusterv1.ContractVersionedObjectReference{
@@ -67,8 +73,8 @@ var _ = Describe("AWSMachine Controller", func() {
 			pool := &networkingv1alpha1.ENIPool{
 				ObjectMeta: metav1.ObjectMeta{Name: "pool-a"},
 				Spec: networkingv1alpha1.ENIPoolSpec{Region: "ap-northeast-2", VPCID: "vpc-0123", Interfaces: []networkingv1alpha1.ENIReference{
-					{ID: "eni-0999", PrivateIP: "10.0.0.20"},
-					{ID: "eni-0123", PrivateIP: "10.0.0.10"},
+					{Key: "edge-worker-1", ID: "eni-0999", PrivateIP: "10.0.0.20"},
+					{Key: "core-worker-1", ID: "eni-0123", PrivateIP: "10.0.0.10"},
 				}, ExhaustionPolicy: networkingv1alpha1.ExhaustionPolicyDynamic},
 			}
 			fakeClient := fake.NewClientBuilder().WithScheme(testScheme).WithObjects(awsMachine, machine, cluster, awsCluster, pool).Build()
@@ -79,12 +85,12 @@ var _ = Describe("AWSMachine Controller", func() {
 
 			updated := &infrastructurev1beta2.AWSMachine{}
 			Expect(fakeClient.Get(context.Background(), types.NamespacedName{Namespace: "workload", Name: "worker-abcde"}, updated)).To(Succeed())
-			Expect(updated.Spec.NetworkInterfaces).To(Equal([]string{"eni-0123"}))
+			Expect(updated.Spec.NetworkInterfaces).To(Equal([]string{"eni-0999"}))
 			Expect(updated.Annotations).NotTo(HaveKey(networkingv1alpha1.CAPPausedAnnotation))
 			Expect(updated.Annotations[networkingv1alpha1.AllocationResultAnnotation]).To(Equal(networkingv1alpha1.AllocationResultAllocated))
 
 			claim := &networkingv1alpha1.ENIClaim{}
-			Expect(fakeClient.Get(context.Background(), types.NamespacedName{Name: "eni-0123"}, claim)).To(Succeed())
+			Expect(fakeClient.Get(context.Background(), types.NamespacedName{Name: "eni-0999"}, claim)).To(Succeed())
 			Expect(claim.Spec.MachineRef.Name).To(Equal("worker-abcde"))
 		})
 	})

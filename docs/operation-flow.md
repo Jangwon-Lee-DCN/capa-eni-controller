@@ -41,6 +41,7 @@ flowchart LR
 | --- | --- | --- | --- |
 | Pool 등록 | `ENIPool` CREATE/UPDATE | 선언 검증 통과 | Pool inventory status 계산 |
 | ENI 할당 | `AWSMachine` CREATE admission | opt-in 값이 정확히 `"true"` | Region/VPC에 맞는 Pool 검색 및 Claim 시도 |
+| key 지정 할당 | 위 ENI 할당 조건 + `interface-key` annotation | Pool에 같은 key가 존재 | 해당 ENI만 Claim 시도 |
 | CAPA 기본 처리 | annotation 없음 또는 값이 `"true"`가 아님 | 없음 | JSON patch 없이 허용 |
 | 사용자 지정 네트워크 보존 | `spec.networkInterfaces`가 이미 존재 | 없음 | 기존 값을 변경하지 않고 허용 |
 | 사용자 pause 보존 | `cluster.x-k8s.io/paused`가 이미 존재 | 없음 | allocator가 개입하지 않고 허용 |
@@ -60,6 +61,19 @@ spec:
 `AWSMachineTemplate.metadata.annotations`가 아니라
 `AWSMachineTemplate.spec.template.metadata.annotations`에 넣어야 CAPI가 생성하는
 각 `AWSMachine`으로 복사한다.
+
+특정 ENI 선택 annotation은 `MachineDeployment`의 Machine template에 넣는다.
+
+```yaml
+spec:
+  template:
+    metadata:
+      annotations:
+        eni.dcn.ssu.ac.kr/interface-key: edge-worker-1
+```
+
+이 값은 CAPI가 만든 `Machine`으로 복사되며 allocator가 AWSMachine의 owner를 통해
+조회한다. AWSMachine 자체에도 같은 annotation이 있으면 그 값을 우선한다.
 
 ## 3. AWSMachine 생성 및 ENI 할당 Sequence
 
@@ -81,7 +95,8 @@ sequenceDiagram
     API->>WH: Mutating admission
     WH->>API: Cluster 및 AWSCluster GET
     WH->>Pool: region + vpcID가 같은 Pool 조회
-    WH->>WH: ENI를 private IPv4 숫자 오름차순 정렬
+    WH->>WH: interface-key가 있으면 후보를 해당 key로 제한
+    WH->>WH: key가 없으면 private IPv4 숫자 오름차순 정렬
     opt Pool에 ENI 후보가 있음
         WH->>Claim: IP 순서대로 ENIClaim atomic CREATE 시도
         Note right of WH: AlreadyExists이면 다음 후보 시도
@@ -112,6 +127,7 @@ sequenceDiagram
 | Cluster 식별 | `GET` | `Cluster` | `cluster.x-k8s.io/cluster-name` label로 소속 Cluster 확인 |
 | VPC 식별 | `GET` | `AWSCluster` | Region과 `spec.network.vpc.id` 확인 |
 | Pool 선택 | `LIST` | `ENIPool` | Region과 VPC ID가 모두 같은 유일한 Pool 선택 |
+| key 조회 | `GET` | owner `Machine` | MachineDeployment template에서 전파된 `interface-key` 확인 |
 | 원자적 예약 | `CREATE` | `ENIClaim/<eni-id>` | 동시 요청 간 동일 ENI 중복 할당 방지 |
 | ENI 주입 | admission JSON patch | `AWSMachine` | 최초 생성 spec에 `networkInterfaces` 포함 |
 | EC2 생성 | CAPA의 AWS operation | EC2/ENI | 선택된 ENI를 primary interface로 사용 |
@@ -141,7 +157,12 @@ flowchart TD
     UserPause -- 아니오 --> Resolve[Cluster → AWSCluster<br/>Region/VPC resolve]
     Resolve --> PoolMatch{일치하는 Pool 존재?}
     PoolMatch -- 아니오 --> DefaultAdmission
-    PoolMatch -- 예 --> Sort[Pool ENI를<br/>private IP 오름차순 정렬]
+    PoolMatch -- 예 --> Key{interface-key가<br/>지정됐는가?}
+    Key -- 예 --> KeyMatch{Pool에 같은 key가<br/>존재하는가?}
+    KeyMatch -- 아니오 --> Reject[오타 방지를 위해<br/>CREATE 거부]
+    KeyMatch -- 예 --> Select[해당 ENI만 후보로 선택]
+    Key -- 아니오 --> Sort[Pool ENI를<br/>private IP 오름차순 정렬]
+    Select --> Available
     Sort --> Available{Claim 가능한 ENI 존재?}
     Available -- 아니오 --> DefaultAdmission
     Available -- 예 --> CreateClaim[ENIClaim atomic CREATE]

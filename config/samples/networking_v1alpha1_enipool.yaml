@@ -10,7 +10,9 @@ spec:
   vpcID: vpc-0123456789abcdef0
   exhaustionPolicy: Dynamic
   interfaces:
-    - id: eni-00000000000000001
+    - key: core-worker-1
+      id: eni-00000000000000001
       privateIP: 10.20.1.25
-    - id: eni-00000000000000002
+    - key: edge-worker-1
+      id: eni-00000000000000002
       privateIP: 10.20.1.26

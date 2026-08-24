@@ -68,7 +68,7 @@ func (r *ENIPoolReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	observed := make([]networkingv1alpha1.ENIObservation, 0, len(pool.Spec.Interfaces))
 	available := 0
 	for _, configured := range pool.Spec.Interfaces {
-		item := networkingv1alpha1.ENIObservation{ID: configured.ID, PrivateIP: configured.PrivateIP}
+		item := networkingv1alpha1.ENIObservation{Key: configured.Key, ID: configured.ID, PrivateIP: configured.PrivateIP}
 		if claim := claimByENI[configured.ID]; claim != nil {
 			item.State = networkingv1alpha1.ENIStateClaimed
 			item.ClaimRef = &claim.Spec.MachineRef

@@ -24,6 +24,7 @@ import (
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	infrastructurev1beta2 "sigs.k8s.io/cluster-api-provider-aws/v2/api/v1beta2"
 	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -87,7 +88,11 @@ func (d *AWSMachineCustomDefaulter) Default(ctx context.Context, obj *infrastruc
 	if err != nil || pool == nil {
 		return err
 	}
-	claim, err := d.claimInterface(ctx, obj, pool)
+	interfaceKey, err := d.resolveInterfaceKey(ctx, obj)
+	if err != nil {
+		return err
+	}
+	claim, err := d.claimInterface(ctx, obj, pool, interfaceKey)
 	if err != nil {
 		return err
 	}
@@ -140,8 +145,37 @@ func (d *AWSMachineCustomDefaulter) findPool(ctx context.Context, region, vpcID 
 	return match, nil
 }
 
-func (d *AWSMachineCustomDefaulter) claimInterface(ctx context.Context, obj *infrastructurev1beta2.AWSMachine, pool *networkingv1alpha1.ENIPool) (*networkingv1alpha1.ENIClaim, error) {
+func (d *AWSMachineCustomDefaulter) resolveInterfaceKey(ctx context.Context, obj *infrastructurev1beta2.AWSMachine) (string, error) {
+	if key := obj.Annotations[networkingv1alpha1.InterfaceKeyAnnotation]; key != "" {
+		return key, nil
+	}
+	for _, owner := range obj.OwnerReferences {
+		ownerGroupVersion, err := schema.ParseGroupVersion(owner.APIVersion)
+		if err != nil || owner.Kind != "Machine" || ownerGroupVersion.Group != clusterv1.GroupVersion.Group {
+			continue
+		}
+		machine := &clusterv1.Machine{}
+		if err := d.Client.Get(ctx, client.ObjectKey{Namespace: obj.Namespace, Name: owner.Name}, machine); err != nil {
+			return "", fmt.Errorf("get owner Machine for interface key: %w", err)
+		}
+		return machine.Annotations[networkingv1alpha1.InterfaceKeyAnnotation], nil
+	}
+	return "", nil
+}
+
+func (d *AWSMachineCustomDefaulter) claimInterface(ctx context.Context, obj *infrastructurev1beta2.AWSMachine, pool *networkingv1alpha1.ENIPool, interfaceKey string) (*networkingv1alpha1.ENIClaim, error) {
 	configured := append([]networkingv1alpha1.ENIReference(nil), pool.Spec.Interfaces...)
+	if interfaceKey != "" {
+		configured = configured[:0]
+		for _, candidate := range pool.Spec.Interfaces {
+			if candidate.Key == interfaceKey {
+				configured = append(configured, candidate)
+			}
+		}
+		if len(configured) == 0 {
+			return nil, fmt.Errorf("ENIPool %q has no interface with key %q", pool.Name, interfaceKey)
+		}
+	}
 	sort.Slice(configured, func(i, j int) bool {
 		left, leftErr := netip.ParseAddr(configured[i].PrivateIP)
 		right, rightErr := netip.ParseAddr(configured[j].PrivateIP)

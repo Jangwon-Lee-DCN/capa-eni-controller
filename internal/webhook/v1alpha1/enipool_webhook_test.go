@@ -52,6 +52,15 @@ var _ = Describe("ENIPool Webhook", func() {
 			_, err := validator.ValidateCreate(ctx, obj)
 			Expect(err).To(MatchError(ContainSubstring("listed more than once")))
 		})
+
+		It("rejects duplicate interface keys in one pool", func() {
+			obj.Spec.Interfaces = []networkingv1alpha1.ENIReference{
+				{Key: "worker-a", ID: "eni-0123", PrivateIP: "10.0.0.10"},
+				{Key: "worker-a", ID: "eni-0456", PrivateIP: "10.0.0.11"},
+			}
+			_, err := validator.ValidateCreate(ctx, obj)
+			Expect(err).To(MatchError(ContainSubstring("interface key \"worker-a\" is listed more than once")))
+		})
 	})
 
 })
