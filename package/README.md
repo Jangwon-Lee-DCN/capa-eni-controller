@@ -6,7 +6,7 @@ Deployment를 하나의 YAML로 렌더링한 KPT 패키지입니다.
 `install.yaml`의 기본 이미지는 다음과 같습니다.
 
 ```text
-ghcr.io/ssu-dcn/capa-eni-controller:v0.1.0
+jangwonlee/capa-eni-controller:v0.2.0
 ```
 
 직접 빌드한 이미지를 사용할 때는 프로젝트 루트에서 패키지를 다시 생성하십시오.

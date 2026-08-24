@@ -4,7 +4,7 @@ metadata:
   name: capa-eni-controller
 info:
   description: Install the CAPA ENI pool allocator
-  site: https://github.com/ssu-dcn/capa-eni-controller
+  site: https://github.com/Jangwon-Lee-DCN/capa-eni-controller
 pipeline:
   mutators: []
   validators: []
