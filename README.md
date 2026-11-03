@@ -142,3 +142,8 @@ Controller 자체는 AWS API를 호출하지 않으므로 AWS IAM 자격 증명�
 cluster용 CAPI 리소스는 별도 KPT 패키지에서 관리하고, opt-in하려는
 `AWSMachineTemplate.spec.template.metadata.annotations`에 위 annotation을
 추가하십시오.
+
+## License
+
+This project is licensed under the Apache License, Version 2.0. See
+[`LICENSE`](LICENSE) for the full license text.
