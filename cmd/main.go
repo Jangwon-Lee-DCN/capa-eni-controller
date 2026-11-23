@@ -202,6 +202,7 @@ func main() {
 	if err := (&controller.ENIClaimReconciler{
 		Client:   providerClient,
 		Scheme:   mgr.GetScheme(),
+		Resource: providerClient.Object("AWSMachine"),
 		Attacher: &awsnet.Attacher{},
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "eniclaim")

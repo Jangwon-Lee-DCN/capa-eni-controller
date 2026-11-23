@@ -30,7 +30,9 @@ import (
 	infrastructurev1beta2 "sigs.k8s.io/cluster-api-provider-aws/v2/api/v1beta2"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	networkingv1alpha1 "github.com/ssu-dcn/capa-eni-controller/api/v1alpha1"
 )
@@ -39,6 +41,7 @@ import (
 type ENIClaimReconciler struct {
 	client.Client
 	Scheme   *runtime.Scheme
+	Resource client.Object
 	Attacher interface {
 		Ensure(context.Context, string, string, string, string, string, int) (bool, error)
 	}
@@ -180,8 +183,34 @@ func boolCondition(value bool) metav1.ConditionStatus {
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *ENIClaimReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &networkingv1alpha1.ENIClaim{}, machineRefIndex, func(obj client.Object) []string {
+		claim := obj.(*networkingv1alpha1.ENIClaim)
+		return []string{claim.Spec.MachineRef.Namespace + "/" + claim.Spec.MachineRef.Name}
+	}); err != nil {
+		return err
+	}
+	resource := r.Resource
+	if resource == nil {
+		resource = &infrastructurev1beta2.AWSMachine{}
+	}
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&networkingv1alpha1.ENIClaim{}).
+		Watches(resource, handler.EnqueueRequestsFromMapFunc(r.claimsForMachine)).
 		Named("eniclaim").
 		Complete(r)
+}
+
+const machineRefIndex = "spec.machineRef"
+
+func (r *ENIClaimReconciler) claimsForMachine(ctx context.Context, machine client.Object) []reconcile.Request {
+	claims := &networkingv1alpha1.ENIClaimList{}
+	if err := r.List(ctx, claims, client.MatchingFields{machineRefIndex: machine.GetNamespace() + "/" + machine.GetName()}); err != nil {
+		logf.FromContext(ctx).Error(err, "Failed to enqueue machine ENI claims")
+		return nil
+	}
+	requests := make([]reconcile.Request, 0, len(claims.Items))
+	for i := range claims.Items {
+		requests = append(requests, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&claims.Items[i])})
+	}
+	return requests
 }
