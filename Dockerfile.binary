@@ -1,0 +1,5 @@
+# Use with a context containing the statically built manager binary.
+FROM scratch
+COPY manager /manager
+USER 65532:65532
+ENTRYPOINT ["/manager"]

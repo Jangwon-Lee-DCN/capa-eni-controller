@@ -48,14 +48,14 @@ var _ = Describe("ENIPool Webhook", func() {
 
 	Context("When creating or updating ENIPool under Validating Webhook", func() {
 		It("rejects duplicate ENIs in one pool", func() {
-			obj.Spec.Interfaces = []networkingv1alpha1.ENIReference{{ID: "eni-0123", PrivateIP: "10.0.0.10"}, {ID: "eni-0123", PrivateIP: "10.0.0.11"}}
+			obj.Spec.Interfaces = []networkingv1alpha1.ENIReference{{ID: fixtureENI, PrivateIP: "10.0.0.10"}, {ID: fixtureENI, PrivateIP: "10.0.0.11"}}
 			_, err := validator.ValidateCreate(ctx, obj)
 			Expect(err).To(MatchError(ContainSubstring("listed more than once")))
 		})
 
 		It("rejects duplicate interface keys in one pool", func() {
 			obj.Spec.Interfaces = []networkingv1alpha1.ENIReference{
-				{Key: "worker-a", ID: "eni-0123", PrivateIP: "10.0.0.10"},
+				{Key: "worker-a", ID: fixtureENI, PrivateIP: "10.0.0.10"},
 				{Key: "worker-a", ID: "eni-0456", PrivateIP: "10.0.0.11"},
 			}
 			_, err := validator.ValidateCreate(ctx, obj)

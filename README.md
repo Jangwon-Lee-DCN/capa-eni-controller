@@ -147,3 +147,38 @@ cluster용 CAPI 리소스는 별도 KPT 패키지에서 관리하고, opt-in하�
 
 This project is licensed under the Apache License, Version 2.0. See
 [`LICENSE`](LICENSE) for the full license text.
+
+## 고정 다중 ENI 묶음
+
+`interface-key`는 primary ENI를 지정한다. `additional-interface-keys`는 그 뒤에
+연결할 ENI의 key를 쉼표로 나열한다. 아래는 Edge worker의 연결 순서다.
+
+```yaml
+spec:
+  template:
+    metadata:
+      annotations:
+        eni.dcn.ssu.ac.kr/allocate-from-pool: "true"
+        eni.dcn.ssu.ac.kr/interface-key: edge_primary_eni
+        eni.dcn.ssu.ac.kr/additional-interface-keys: edge_n2_eni,edge_n4_eni,edge_n3_eni,edge_n6_eni
+```
+
+- ENIPool에 다섯 ENI를 각각 등록한다. CAPA에 primary → N2 → N4 → N3 → N6 순서로 전달한다.
+- 모든 ENI를 예약한 경우에만 AWSMachine을 허용한다. 중간 예약에 실패하면 그 요청에서 새로 만든 Claim을 해제한다.
+- 동일 admission 요청의 재진입은 자기 Claim을 재사용한다. 서로 다른 admission 요청은 같은 Machine 이름이라도 Claim을 공유하지 않는다. 실패한 생성 요청의 잔여 Claim은 기존 30초 유예 후 회수된다.
+- 누락·중복 key, 다른 Machine이 예약한 ENI는 거부한다. 다중 ENI 묶음은 동적 네트워크로 전환하지 않는다.
+- ENI와 primary·secondary IP는 AWS에 미리 준비한다. 컨트롤러는 IP를 새로 할당하거나 ENI를 생성하지 않는다.
+- ENI들은 같은 VPC·AZ에 있어야 한다. 주소·subnet·사용 가능 상태는 설치 전 AWS 조회로 확인한다.
+- 고정 ENI를 재사용하는 MachineDeployment는 `maxSurge: 0`, `maxUnavailable: 1`을 사용한다.
+
+### 로컬 바이너리 이미지
+
+```bash
+build_dir=$(mktemp -d)
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags='-s -w' -o "$build_dir/manager" cmd/main.go
+revision=$(git rev-parse HEAD)
+docker build -f Dockerfile.binary --label "org.opencontainers.image.revision=$revision" -t "localhost/capa-eni-controller:source-${revision:0:12}" "$build_dir"
+```
+
+이 경로는 소스가 없는 정적 바이너리 이미지를 만든다. Registry로 전송하지 않는다.
+공개 릴리스 `v0.2.0`은 단일 ENI용이므로 이 묶음 설정에 사용하지 않는다.

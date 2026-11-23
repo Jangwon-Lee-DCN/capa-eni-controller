@@ -20,7 +20,8 @@ import (
 	"context"
 	"fmt"
 	"net/netip"
-	"sort"
+	"slices"
+	"strings"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -72,8 +73,8 @@ func (r *AWSMachineReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	if machine.DeletionTimestamp != nil {
 		return ctrl.Result{}, nil
 	}
-	if machine.Annotations[networkingv1alpha1.AllocateFromPoolAnnotation] != "true" ||
-		machine.Annotations[networkingv1alpha1.AllocatorPausedAnnotation] != "true" ||
+	if machine.Annotations[networkingv1alpha1.AllocateFromPoolAnnotation] != allocationEnabled ||
+		machine.Annotations[networkingv1alpha1.AllocatorPausedAnnotation] != allocationEnabled ||
 		len(machine.Spec.NetworkInterfaces) > 0 {
 		return ctrl.Result{}, nil
 	}
@@ -126,7 +127,7 @@ func (r *AWSMachineReconciler) resolveClusterNetwork(ctx context.Context, awsMac
 	var ownerName string
 	for _, owner := range awsMachine.OwnerReferences {
 		ownerGroupVersion, err := schema.ParseGroupVersion(owner.APIVersion)
-		if err == nil && owner.Kind == "Machine" && ownerGroupVersion.Group == clusterv1.GroupVersion.Group {
+		if err == nil && owner.Kind == capiMachineKind && ownerGroupVersion.Group == clusterv1.GroupVersion.Group {
 			ownerName = owner.Name
 			break
 		}
@@ -143,7 +144,7 @@ func (r *AWSMachineReconciler) resolveClusterNetwork(ctx context.Context, awsMac
 		return "", "", fmt.Errorf("get Cluster: %w", err)
 	}
 	if !cluster.Spec.InfrastructureRef.IsDefined() || cluster.Spec.InfrastructureRef.Kind != "AWSCluster" {
-		return "", "", fmt.Errorf("Cluster does not reference an AWSCluster")
+		return "", "", fmt.Errorf("cluster does not reference an AWSCluster")
 	}
 	awsCluster := &infrastructurev1beta2.AWSCluster{}
 	if err := r.Get(ctx, client.ObjectKey{Namespace: awsMachine.Namespace, Name: cluster.Spec.InfrastructureRef.Name}, awsCluster); err != nil {
@@ -179,7 +180,7 @@ func (r *AWSMachineReconciler) resolveInterfaceKey(ctx context.Context, awsMachi
 	}
 	for _, owner := range awsMachine.OwnerReferences {
 		ownerGroupVersion, err := schema.ParseGroupVersion(owner.APIVersion)
-		if err != nil || owner.Kind != "Machine" || ownerGroupVersion.Group != clusterv1.GroupVersion.Group {
+		if err != nil || owner.Kind != capiMachineKind || ownerGroupVersion.Group != clusterv1.GroupVersion.Group {
 			continue
 		}
 		machine := &clusterv1.Machine{}
@@ -214,13 +215,13 @@ func (r *AWSMachineReconciler) claimInterface(ctx context.Context, machine *infr
 			return nil, fmt.Errorf("ENIPool %q has no interface with key %q", pool.Name, interfaceKey)
 		}
 	}
-	sort.Slice(configured, func(i, j int) bool {
-		left, leftErr := netip.ParseAddr(configured[i].PrivateIP)
-		right, rightErr := netip.ParseAddr(configured[j].PrivateIP)
+	slices.SortFunc(configured, func(a, b networkingv1alpha1.ENIReference) int {
+		left, leftErr := netip.ParseAddr(a.PrivateIP)
+		right, rightErr := netip.ParseAddr(b.PrivateIP)
 		if leftErr != nil || rightErr != nil {
-			return configured[i].PrivateIP < configured[j].PrivateIP
+			return strings.Compare(a.PrivateIP, b.PrivateIP)
 		}
-		return left.Compare(right) < 0
+		return left.Compare(right)
 	})
 	for _, requested := range configured {
 		claim := &networkingv1alpha1.ENIClaim{
@@ -262,7 +263,7 @@ func (r *AWSMachineReconciler) markFailed(ctx context.Context, machine *infrastr
 }
 
 func removeAllocatorPause(machine *infrastructurev1beta2.AWSMachine) {
-	if machine.Annotations == nil || machine.Annotations[networkingv1alpha1.AllocatorPausedAnnotation] != "true" {
+	if machine.Annotations == nil || machine.Annotations[networkingv1alpha1.AllocatorPausedAnnotation] != allocationEnabled {
 		return
 	}
 	delete(machine.Annotations, networkingv1alpha1.AllocatorPausedAnnotation)

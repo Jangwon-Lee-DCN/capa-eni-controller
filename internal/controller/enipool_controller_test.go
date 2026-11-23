@@ -43,7 +43,7 @@ var _ = Describe("ENIPool Controller", func() {
 			By("creating the custom resource for the Kind ENIPool")
 			resource := &networkingv1alpha1.ENIPool{
 				ObjectMeta: metav1.ObjectMeta{Name: resourceName},
-				Spec:       networkingv1alpha1.ENIPoolSpec{Region: "ap-northeast-2", VPCID: "vpc-0123", Interfaces: []networkingv1alpha1.ENIReference{{ID: "eni-0123", PrivateIP: "10.0.0.10"}}},
+				Spec:       networkingv1alpha1.ENIPoolSpec{Region: fixtureRegion, VPCID: fixtureVPC, Interfaces: []networkingv1alpha1.ENIReference{{ID: fixtureCoreENI, PrivateIP: "10.0.0.10"}}},
 			}
 			Expect(k8sClient.Create(ctx, resource)).To(Succeed())
 		})
