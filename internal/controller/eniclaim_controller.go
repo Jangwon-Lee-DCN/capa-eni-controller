@@ -18,7 +18,9 @@ package controller
 
 import (
 	"context"
+	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -36,7 +38,10 @@ import (
 // ENIClaimReconciler reconciles a ENIClaim object
 type ENIClaimReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
+	Scheme   *runtime.Scheme
+	Attacher interface {
+		Ensure(context.Context, string, string, string, string, string, int) (bool, error)
+	}
 }
 
 // +kubebuilder:rbac:groups=networking.dcn.ssu.ac.kr,resources=eniclaims,verbs=get;list;watch;create;update;patch;delete
@@ -93,6 +98,30 @@ func (r *ENIClaimReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	}
 	if err != nil {
 		return ctrl.Result{}, err
+	}
+	if machine.Annotations[networkingv1alpha1.AttachAdditionalAnnotation] == allocationEnabled {
+		ids := strings.Split(machine.Annotations[networkingv1alpha1.InterfaceSetAnnotation], ",")
+		index := slices.Index(ids, claim.Spec.ENIID)
+		if index < 0 || r.Attacher == nil {
+			return ctrl.Result{}, fmt.Errorf("reserved ENI attachment plan or attacher missing")
+		}
+		instanceID := ""
+		if machine.Spec.InstanceID != nil {
+			instanceID = *machine.Spec.InstanceID
+		} else if machine.Spec.ProviderID != nil {
+			parts := strings.Split(*machine.Spec.ProviderID, "/")
+			instanceID = parts[len(parts)-1]
+		}
+		if instanceID == "" {
+			return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+		}
+		ready, e := r.Attacher.Ensure(ctx, pool.Spec.Region, pool.Spec.VPCID, claim.Spec.ENIID, configuredPrivateIP(pool, claim.Spec.ENIID), instanceID, index)
+		if e != nil {
+			return ctrl.Result{}, e
+		}
+		if !ready {
+			return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+		}
 	}
 	phase := networkingv1alpha1.ENIClaimPhaseBound
 	privateIP := configuredPrivateIP(pool, claim.Spec.ENIID)

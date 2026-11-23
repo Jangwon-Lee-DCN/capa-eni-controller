@@ -44,6 +44,7 @@ type AWSMachineReconciler struct {
 	client.Client
 	Scheme   *runtime.Scheme
 	Recorder events.EventRecorder
+	Resource client.Object
 }
 
 // +kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=awsmachines,verbs=get;list;watch;create;update;patch;delete
@@ -283,8 +284,12 @@ func setAnnotation(machine *infrastructurev1beta2.AWSMachine, key, value string)
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *AWSMachineReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	resource := r.Resource
+	if resource == nil {
+		resource = &infrastructurev1beta2.AWSMachine{}
+	}
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&infrastructurev1beta2.AWSMachine{}).
+		For(resource).
 		Named("awsmachine").
 		Complete(r)
 }

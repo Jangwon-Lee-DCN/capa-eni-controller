@@ -31,7 +31,7 @@ func bundleFixture(t *testing.T, n int) (*AWSMachineCustomDefaulter, *infrastruc
 	for i := range n {
 		pool.Spec.Interfaces = append(pool.Spec.Interfaces, networkingv1alpha1.ENIReference{Key: keys[i], ID: ids[i], PrivateIP: "172.31.81.10"})
 	}
-	cluster := &clusterv1.Cluster{ObjectMeta: metav1.ObjectMeta{Name: fixtureBundleCluster, Namespace: fixtureDefaultNamespace}, Spec: clusterv1.ClusterSpec{InfrastructureRef: clusterv1.ContractVersionedObjectReference{APIGroup: "infrastructure.cluster.x-k8s.io", Kind: awsClusterKind, Name: fixtureBundleCluster}}}
+	cluster := &clusterv1.Cluster{ObjectMeta: metav1.ObjectMeta{Name: fixtureBundleCluster, Namespace: fixtureDefaultNamespace}, Spec: clusterv1.ClusterSpec{InfrastructureRef: clusterv1.ContractVersionedObjectReference{APIGroup: infraGroup, Kind: awsClusterKind, Name: fixtureBundleCluster}}}
 	aws := &infrastructurev1beta2.AWSCluster{ObjectMeta: metav1.ObjectMeta{Name: fixtureBundleCluster, Namespace: fixtureDefaultNamespace}, Spec: infrastructurev1beta2.AWSClusterSpec{Region: pool.Spec.Region, NetworkSpec: infrastructurev1beta2.NetworkSpec{VPC: infrastructurev1beta2.VPCSpec{ID: pool.Spec.VPCID}}}}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(pool, cluster, aws).Build()
 	obj := &infrastructurev1beta2.AWSMachine{ObjectMeta: metav1.ObjectMeta{Name: "worker", Namespace: fixtureDefaultNamespace, Labels: map[string]string{clusterv1.ClusterNameLabel: fixtureBundleCluster}, Annotations: map[string]string{networkingv1alpha1.AllocateFromPoolAnnotation: allocationEnabled, networkingv1alpha1.InterfaceKeyAnnotation: fixturePrimaryKey}}}
@@ -67,6 +67,21 @@ func TestInterfaceSetOrderedAndIdempotent(t *testing.T) {
 		if got := claimCount(t, d); got != n {
 			t.Fatalf("got %d claims, wanted %d", got, n)
 		}
+	}
+}
+
+func TestPrimaryOnlyCAPAStillReservesCompleteSet(t *testing.T) {
+	d, obj, _ := bundleFixture(t, 5)
+	obj.Annotations[networkingv1alpha1.AdditionalInterfaceKeysAnnotation] = fixtureAdditionalKeys + ",n3,n6"
+	obj.Annotations[networkingv1alpha1.AttachAdditionalAnnotation] = allocationEnabled
+	if err := d.Default(context.Background(), obj); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(obj.Spec.NetworkInterfaces, []string{fixturePrimaryENI}) || claimCount(t, d) != 5 {
+		t.Fatal("primary-only CAPA path did not retain all reservations")
+	}
+	if obj.Annotations[networkingv1alpha1.InterfaceSetAnnotation] != fixturePrimaryENI+",eni-002,"+fixtureN4ENI+",eni-004,eni-005" {
+		t.Fatal("attachment order lost")
 	}
 }
 func TestInterfaceSetRejectsMalformedKeysBeforeReserving(t *testing.T) {

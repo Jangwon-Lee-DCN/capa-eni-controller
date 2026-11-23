@@ -41,15 +41,18 @@ import (
 var awsmachinelog = logf.Log.WithName("awsmachine-resource")
 
 // SetupAWSMachineWebhookWithManager registers the webhook for AWSMachine in the manager.
-func SetupAWSMachineWebhookWithManager(mgr ctrl.Manager) error {
-	return ctrl.NewWebhookManagedBy(mgr, &infrastructurev1beta2.AWSMachine{}).
-		WithDefaulter(&AWSMachineCustomDefaulter{Client: mgr.GetClient()}).
-		Complete()
+func SetupAWSMachineWebhookWithManager(mgr ctrl.Manager, clients ...client.Client) error {
+	c := mgr.GetClient()
+	if len(clients) > 0 {
+		c = clients[0]
+	}
+	mgr.GetWebhookServer().Register("/mutate-infrastructure-cluster-x-k8s-io-v1beta2-awsmachine", &admission.Webhook{Handler: &AWSMachineAdmission{Defaulter: &AWSMachineCustomDefaulter{Client: c}}})
+	return nil
 }
 
 // TODO(user): EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
 
-// +kubebuilder:webhook:path=/mutate-infrastructure-cluster-x-k8s-io-v1beta2-awsmachine,mutating=true,failurePolicy=fail,sideEffects=NoneOnDryRun,groups=infrastructure.cluster.x-k8s.io,resources=awsmachines,verbs=create,versions=v1beta2,name=mawsmachine-v1beta2.eni.dcn.ssu.ac.kr,admissionReviewVersions=v1
+// +kubebuilder:webhook:path=/mutate-infrastructure-cluster-x-k8s-io-v1beta2-awsmachine,mutating=true,failurePolicy=fail,sideEffects=NoneOnDryRun,groups=infrastructure.cluster.x-k8s.io,resources=awsmachines,verbs=create,versions=v1beta1;v1beta2,name=mawsmachine-v1beta2.eni.dcn.ssu.ac.kr,admissionReviewVersions=v1
 
 // AWSMachineCustomDefaulter struct is responsible for setting default values on the custom resource of the
 // Kind AWSMachine when those are created or updated.
@@ -113,6 +116,10 @@ func (d *AWSMachineCustomDefaulter) Default(ctx context.Context, obj *infrastruc
 			annotations = map[string]string{}
 		}
 		annotations[networkingv1alpha1.AllocationResultAnnotation] = networkingv1alpha1.AllocationResultAllocated
+		if annotations[networkingv1alpha1.AttachAdditionalAnnotation] == allocationEnabled {
+			annotations[networkingv1alpha1.InterfaceSetAnnotation] = strings.Join(ids, ",")
+			obj.Spec.NetworkInterfaces = ids[:1]
+		}
 		obj.SetAnnotations(annotations)
 		return nil
 	}

@@ -60,7 +60,7 @@ var _ = Describe("AWSMachine Webhook", func() {
 			cluster := &clusterv1.Cluster{
 				ObjectMeta: metav1.ObjectMeta{Name: fixtureCluster, Namespace: fixtureNamespace},
 				Spec: clusterv1.ClusterSpec{InfrastructureRef: clusterv1.ContractVersionedObjectReference{
-					APIGroup: "infrastructure.cluster.x-k8s.io", Kind: awsClusterKind, Name: fixtureCluster,
+					APIGroup: infraGroup, Kind: awsClusterKind, Name: fixtureCluster,
 				}},
 			}
 			awsCluster := &infrastructurev1beta2.AWSCluster{

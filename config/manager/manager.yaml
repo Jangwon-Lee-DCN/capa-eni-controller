@@ -65,6 +65,10 @@ spec:
           - --health-probe-bind-address=:8081
         image: controller:latest
         name: manager
+        envFrom:
+        - secretRef:
+            name: eni-controller-aws
+            optional: true
         ports:
         - containerPort: 8081
           name: health

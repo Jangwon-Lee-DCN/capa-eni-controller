@@ -176,9 +176,35 @@ spec:
 ```bash
 build_dir=$(mktemp -d)
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags='-s -w' -o "$build_dir/manager" cmd/main.go
+cp /etc/ssl/certs/ca-certificates.crt "$build_dir/ca-certificates.crt"
 revision=$(git rev-parse HEAD)
 docker build -f Dockerfile.binary --label "org.opencontainers.image.revision=$revision" -t "localhost/capa-eni-controller:source-${revision:0:12}" "$build_dir"
 ```
 
 이 경로는 소스가 없는 정적 바이너리 이미지를 만든다. Registry로 전송하지 않는다.
 공개 릴리스 `v0.2.0`은 단일 ENI용이므로 이 묶음 설정에 사용하지 않는다.
+
+## CAPA API compatibility and additional interfaces
+
+The allocator discovers served versions independently for `AWSMachine`, `AWSCluster`, CAPI `Machine` and `Cluster`. It prefers `v1beta2` and accepts `v1beta1` when that is the served contract. The admission endpoint handles both AWSMachine versions. Provider fields outside the allocator's metadata and ENI changes are preserved; upgrading CAPA is not required for these contracts.
+
+For CAPA CRDs that limit `spec.networkInterfaces`, opt in to controller-managed data interfaces on the worker AWSMachineTemplate:
+
+```yaml
+spec:
+  template:
+    metadata:
+      annotations:
+        eni.dcn.ssu.ac.kr/allocate-from-pool: "true"
+        eni.dcn.ssu.ac.kr/interface-key: primary
+        eni.dcn.ssu.ac.kr/additional-interface-keys: n2,n4,n3,n6
+        eni.dcn.ssu.ac.kr/attach-additional-interfaces: "true"
+```
+
+The keys reference ENIPool entries. Admission reserves the full set, writes only the primary ID to `spec.networkInterfaces`, and records the ordered IDs in `eni.dcn.ssu.ac.kr/reserved-interface-set`. CAPA creates the instance with the primary ENI. The ENIClaim reconciler obtains its EC2 instance ID from AWSMachine and attaches data ENIs at device indexes 1 onward. Earlier indexes must be attached before the next index is connected. Instance/ENI VPC, AZ, primary IP and occupied slots are checked. Existing attachments are reused, never detached or taken over. `DeleteOnTermination=false` preserves the ENIs and their IP assignments for replacement nodes.
+
+The node bootstrap must wait for the expected ENI IDs and device indexes before kubeadm. With the annotation absent, existing complete-list allocation behavior is retained.
+
+The controller uses the standard AWS SDK credential chain. An optional `eni-controller-aws` Secret can supply `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN` and `AWS_REGION`; Pod IAM credentials can be used instead. Required AWS actions are `ec2:DescribeInstances`, `ec2:DescribeNetworkInterfaces`, `ec2:AttachNetworkInterface` and `ec2:ModifyNetworkInterfaceAttribute`. Scope mutations to the managed ENIs and instance boundary.
+
+Validation includes legacy-only API-server envtest, mixed CAPI/CAPA API selection, both admission wire versions, partial reservation rollback, and attachment idempotency and conflict rejection.
