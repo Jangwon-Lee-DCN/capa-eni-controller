@@ -2,8 +2,10 @@
 
 이 문서는 CAPA가 `AWSMachineTemplate`에서 `AWSMachine`을 생성할 때 사전 생성된
 ENI를 선택하고 EC2의 primary private IP를 고정하는 최종 런타임 흐름을 설명한다.
-현재 구현은 AWS API를 호출하지 않는 trust mode이며, Kubernetes에 선언된
-`ENIPool`과 `ENIClaim`만을 기준으로 동작한다.
+아래는 기본 trust mode의 할당 흐름이며, Kubernetes에 선언된 `ENIPool`과
+`ENIClaim`을 기준으로 동작한다. `attach-additional-interfaces: "true"`를 사용하는
+다중 ENI 구성에서는 ENIClaim controller가 AWS API로 실제 연결을 검사하고 추가
+ENI를 연결한다. 해당 모드의 토폴로지와 시퀀스는 [README](../README.md#동작-구조-및-토폴로지)에 있다.
 
 ## 1. 구성요소 Topology
 

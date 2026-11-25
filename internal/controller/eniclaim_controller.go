@@ -18,6 +18,9 @@ package controller
 
 import (
 	"context"
+	"fmt"
+	"slices"
+	"strings"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -27,7 +30,9 @@ import (
 	infrastructurev1beta2 "sigs.k8s.io/cluster-api-provider-aws/v2/api/v1beta2"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	networkingv1alpha1 "github.com/ssu-dcn/capa-eni-controller/api/v1alpha1"
 )
@@ -35,7 +40,11 @@ import (
 // ENIClaimReconciler reconciles a ENIClaim object
 type ENIClaimReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
+	Scheme   *runtime.Scheme
+	Resource client.Object
+	Attacher interface {
+		Ensure(context.Context, string, string, string, string, string, int) (bool, error)
+	}
 }
 
 // +kubebuilder:rbac:groups=networking.dcn.ssu.ac.kr,resources=eniclaims,verbs=get;list;watch;create;update;patch;delete
@@ -93,6 +102,30 @@ func (r *ENIClaimReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	if err != nil {
 		return ctrl.Result{}, err
 	}
+	if machine.Annotations[networkingv1alpha1.AttachAdditionalAnnotation] == allocationEnabled {
+		ids := strings.Split(machine.Annotations[networkingv1alpha1.InterfaceSetAnnotation], ",")
+		index := slices.Index(ids, claim.Spec.ENIID)
+		if index < 0 || r.Attacher == nil {
+			return ctrl.Result{}, fmt.Errorf("reserved ENI attachment plan or attacher missing")
+		}
+		instanceID := ""
+		if machine.Spec.InstanceID != nil {
+			instanceID = *machine.Spec.InstanceID
+		} else if machine.Spec.ProviderID != nil {
+			parts := strings.Split(*machine.Spec.ProviderID, "/")
+			instanceID = parts[len(parts)-1]
+		}
+		if instanceID == "" {
+			return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+		}
+		ready, e := r.Attacher.Ensure(ctx, pool.Spec.Region, pool.Spec.VPCID, claim.Spec.ENIID, configuredPrivateIP(pool, claim.Spec.ENIID), instanceID, index)
+		if e != nil {
+			return ctrl.Result{}, e
+		}
+		if !ready {
+			return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+		}
+	}
 	phase := networkingv1alpha1.ENIClaimPhaseBound
 	privateIP := configuredPrivateIP(pool, claim.Spec.ENIID)
 	if privateIP == "" {
@@ -128,12 +161,7 @@ func (r *ENIClaimReconciler) removeFinalizer(ctx context.Context, claim *network
 }
 
 func containsString(values []string, wanted string) bool {
-	for _, value := range values {
-		if value == wanted {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(values, wanted)
 }
 
 func removeString(values []string, unwanted string) []string {
@@ -155,8 +183,34 @@ func boolCondition(value bool) metav1.ConditionStatus {
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *ENIClaimReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &networkingv1alpha1.ENIClaim{}, machineRefIndex, func(obj client.Object) []string {
+		claim := obj.(*networkingv1alpha1.ENIClaim)
+		return []string{claim.Spec.MachineRef.Namespace + "/" + claim.Spec.MachineRef.Name}
+	}); err != nil {
+		return err
+	}
+	resource := r.Resource
+	if resource == nil {
+		resource = &infrastructurev1beta2.AWSMachine{}
+	}
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&networkingv1alpha1.ENIClaim{}).
+		Watches(resource, handler.EnqueueRequestsFromMapFunc(r.claimsForMachine)).
 		Named("eniclaim").
 		Complete(r)
+}
+
+const machineRefIndex = "spec.machineRef"
+
+func (r *ENIClaimReconciler) claimsForMachine(ctx context.Context, machine client.Object) []reconcile.Request {
+	claims := &networkingv1alpha1.ENIClaimList{}
+	if err := r.List(ctx, claims, client.MatchingFields{machineRefIndex: machine.GetNamespace() + "/" + machine.GetName()}); err != nil {
+		logf.FromContext(ctx).Error(err, "Failed to enqueue machine ENI claims")
+		return nil
+	}
+	requests := make([]reconcile.Request, 0, len(claims.Items))
+	for i := range claims.Items {
+		requests = append(requests, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&claims.Items[i])})
+	}
+	return requests
 }

@@ -39,6 +39,8 @@ import (
 	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 
 	networkingv1alpha1 "github.com/ssu-dcn/capa-eni-controller/api/v1alpha1"
+	"github.com/ssu-dcn/capa-eni-controller/internal/awsnet"
+	"github.com/ssu-dcn/capa-eni-controller/internal/compat"
 	"github.com/ssu-dcn/capa-eni-controller/internal/controller"
 	webhookv1alpha1 "github.com/ssu-dcn/capa-eni-controller/internal/webhook/v1alpha1"
 	webhookv1beta2 "github.com/ssu-dcn/capa-eni-controller/internal/webhook/v1beta2"
@@ -184,6 +186,12 @@ func main() {
 		setupLog.Error(err, "Failed to start manager")
 		os.Exit(1)
 	}
+	providerClient, err := compat.New(mgr.GetClient(), mgr.GetRESTMapper())
+	if err != nil {
+		setupLog.Error(err, "Failed to discover provider API versions")
+		os.Exit(1)
+	}
+	setupLog.Info("Selected provider API versions", "versions", providerClient.Versions)
 	if err := (&controller.ENIPoolReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
@@ -192,21 +200,24 @@ func main() {
 		os.Exit(1)
 	}
 	if err := (&controller.ENIClaimReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
+		Client:   providerClient,
+		Scheme:   mgr.GetScheme(),
+		Resource: providerClient.Object("AWSMachine"),
+		Attacher: &awsnet.Attacher{},
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "eniclaim")
 		os.Exit(1)
 	}
 	// nolint:goconst
 	if os.Getenv("ENABLE_WEBHOOKS") != "false" {
-		if err := webhookv1beta2.SetupAWSMachineWebhookWithManager(mgr); err != nil {
+		if err := webhookv1beta2.SetupAWSMachineWebhookWithManager(mgr, providerClient); err != nil {
 			setupLog.Error(err, "Failed to create webhook", "webhook", "AWSMachine")
 			os.Exit(1)
 		}
 	}
 	if err := (&controller.AWSMachineReconciler{
-		Client:   mgr.GetClient(),
+		Client:   providerClient,
+		Resource: providerClient.Object("AWSMachine"),
 		Scheme:   mgr.GetScheme(),
 		Recorder: mgr.GetEventRecorder("capa-eni-controller"),
 	}).SetupWithManager(mgr); err != nil {

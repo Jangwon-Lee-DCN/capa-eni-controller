@@ -39,7 +39,7 @@ var _ = Describe("ENIClaim Webhook", func() {
 	Context("When creating or updating ENIClaim under Validating Webhook", func() {
 		It("requires the claim name to equal the ENI ID", func() {
 			obj.Name = "wrong-name"
-			obj.Spec.ENIID = "eni-0123"
+			obj.Spec.ENIID = fixtureENI
 			_, err := validator.ValidateCreate(ctx, obj)
 			Expect(err).To(MatchError("ENIClaim name must equal spec.eniID"))
 		})

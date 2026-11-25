@@ -50,30 +50,30 @@ var _ = Describe("AWSMachine Webhook", func() {
 			Expect(infrastructurev1beta2.AddToScheme(testScheme)).To(Succeed())
 
 			obj = &infrastructurev1beta2.AWSMachine{ObjectMeta: metav1.ObjectMeta{
-				Name: "worker-abcde", Namespace: "workload",
-				Labels: map[string]string{clusterv1.ClusterNameLabel: "cluster-a"},
+				Name: "worker-abcde", Namespace: fixtureNamespace,
+				Labels: map[string]string{clusterv1.ClusterNameLabel: fixtureCluster},
 				Annotations: map[string]string{
-					networkingv1alpha1.AllocateFromPoolAnnotation: "true",
+					networkingv1alpha1.AllocateFromPoolAnnotation: allocationEnabled,
 					networkingv1alpha1.InterfaceKeyAnnotation:     "edge-worker-1",
 				},
 			}}
 			cluster := &clusterv1.Cluster{
-				ObjectMeta: metav1.ObjectMeta{Name: "cluster-a", Namespace: "workload"},
+				ObjectMeta: metav1.ObjectMeta{Name: fixtureCluster, Namespace: fixtureNamespace},
 				Spec: clusterv1.ClusterSpec{InfrastructureRef: clusterv1.ContractVersionedObjectReference{
-					APIGroup: "infrastructure.cluster.x-k8s.io", Kind: "AWSCluster", Name: "cluster-a",
+					APIGroup: infraGroup, Kind: awsClusterKind, Name: fixtureCluster,
 				}},
 			}
 			awsCluster := &infrastructurev1beta2.AWSCluster{
-				ObjectMeta: metav1.ObjectMeta{Name: "cluster-a", Namespace: "workload"},
+				ObjectMeta: metav1.ObjectMeta{Name: fixtureCluster, Namespace: fixtureNamespace},
 				Spec: infrastructurev1beta2.AWSClusterSpec{
-					Region:      "ap-northeast-2",
-					NetworkSpec: infrastructurev1beta2.NetworkSpec{VPC: infrastructurev1beta2.VPCSpec{ID: "vpc-0123"}},
+					Region:      fixtureRegion,
+					NetworkSpec: infrastructurev1beta2.NetworkSpec{VPC: infrastructurev1beta2.VPCSpec{ID: fixtureVPC}},
 				},
 			}
 			pool := &networkingv1alpha1.ENIPool{
 				ObjectMeta: metav1.ObjectMeta{Name: "pool-a"},
 				Spec: networkingv1alpha1.ENIPoolSpec{
-					Region: "ap-northeast-2", VPCID: "vpc-0123",
+					Region: fixtureRegion, VPCID: fixtureVPC,
 					Interfaces: []networkingv1alpha1.ENIReference{
 						{Key: "core-worker-1", ID: "eni-0123", PrivateIP: "10.0.0.10"},
 						{Key: "edge-worker-1", ID: "eni-0999", PrivateIP: "10.0.0.20"},
@@ -87,10 +87,10 @@ var _ = Describe("AWSMachine Webhook", func() {
 		})
 
 		It("pauses an opted-in machine", func() {
-			obj.Annotations = map[string]string{networkingv1alpha1.AllocateFromPoolAnnotation: "true"}
+			obj.Annotations = map[string]string{networkingv1alpha1.AllocateFromPoolAnnotation: allocationEnabled}
 			Expect(defaulter.Default(ctx, obj)).To(Succeed())
 			Expect(obj.Annotations).To(HaveKey(networkingv1alpha1.CAPPausedAnnotation))
-			Expect(obj.Annotations[networkingv1alpha1.AllocatorPausedAnnotation]).To(Equal("true"))
+			Expect(obj.Annotations[networkingv1alpha1.AllocatorPausedAnnotation]).To(Equal(allocationEnabled))
 		})
 
 		It("does not affect a machine without opt-in", func() {
@@ -100,7 +100,7 @@ var _ = Describe("AWSMachine Webhook", func() {
 
 		It("preserves a user pause", func() {
 			obj.Annotations = map[string]string{
-				networkingv1alpha1.AllocateFromPoolAnnotation: "true",
+				networkingv1alpha1.AllocateFromPoolAnnotation: allocationEnabled,
 				networkingv1alpha1.CAPPausedAnnotation:        "",
 			}
 			Expect(defaulter.Default(ctx, obj)).To(Succeed())

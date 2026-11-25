@@ -20,7 +20,8 @@ import (
 	"context"
 	"fmt"
 	"net/netip"
-	"sort"
+	"slices"
+	"strings"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -40,15 +41,18 @@ import (
 var awsmachinelog = logf.Log.WithName("awsmachine-resource")
 
 // SetupAWSMachineWebhookWithManager registers the webhook for AWSMachine in the manager.
-func SetupAWSMachineWebhookWithManager(mgr ctrl.Manager) error {
-	return ctrl.NewWebhookManagedBy(mgr, &infrastructurev1beta2.AWSMachine{}).
-		WithDefaulter(&AWSMachineCustomDefaulter{Client: mgr.GetClient()}).
-		Complete()
+func SetupAWSMachineWebhookWithManager(mgr ctrl.Manager, clients ...client.Client) error {
+	c := mgr.GetClient()
+	if len(clients) > 0 {
+		c = clients[0]
+	}
+	mgr.GetWebhookServer().Register("/mutate-infrastructure-cluster-x-k8s-io-v1beta2-awsmachine", &admission.Webhook{Handler: &AWSMachineAdmission{Defaulter: &AWSMachineCustomDefaulter{Client: c}}})
+	return nil
 }
 
 // TODO(user): EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
 
-// +kubebuilder:webhook:path=/mutate-infrastructure-cluster-x-k8s-io-v1beta2-awsmachine,mutating=true,failurePolicy=fail,sideEffects=NoneOnDryRun,groups=infrastructure.cluster.x-k8s.io,resources=awsmachines,verbs=create,versions=v1beta2,name=mawsmachine-v1beta2.eni.dcn.ssu.ac.kr,admissionReviewVersions=v1
+// +kubebuilder:webhook:path=/mutate-infrastructure-cluster-x-k8s-io-v1beta2-awsmachine,mutating=true,failurePolicy=fail,sideEffects=NoneOnDryRun,groups=infrastructure.cluster.x-k8s.io,resources=awsmachines,verbs=create,versions=v1beta1;v1beta2,name=mawsmachine-v1beta2.eni.dcn.ssu.ac.kr,admissionReviewVersions=v1
 
 // AWSMachineCustomDefaulter struct is responsible for setting default values on the custom resource of the
 // Kind AWSMachine when those are created or updated.
@@ -62,7 +66,7 @@ type AWSMachineCustomDefaulter struct {
 // Default implements webhook.CustomDefaulter so a webhook will be registered for the Kind AWSMachine.
 func (d *AWSMachineCustomDefaulter) Default(ctx context.Context, obj *infrastructurev1beta2.AWSMachine) error {
 	annotations := obj.GetAnnotations()
-	if annotations[networkingv1alpha1.AllocateFromPoolAnnotation] != "true" || len(obj.Spec.NetworkInterfaces) > 0 {
+	if annotations[networkingv1alpha1.AllocateFromPoolAnnotation] != allocationEnabled || len(obj.Spec.NetworkInterfaces) > 0 {
 		return nil
 	}
 	if _, explicitlyPaused := annotations[networkingv1alpha1.CAPPausedAnnotation]; explicitlyPaused {
@@ -73,7 +77,7 @@ func (d *AWSMachineCustomDefaulter) Default(ctx context.Context, obj *infrastruc
 			annotations = map[string]string{}
 		}
 		annotations[networkingv1alpha1.CAPPausedAnnotation] = ""
-		annotations[networkingv1alpha1.AllocatorPausedAnnotation] = "true"
+		annotations[networkingv1alpha1.AllocatorPausedAnnotation] = allocationEnabled
 		obj.SetAnnotations(annotations)
 		return nil
 	}
@@ -85,18 +89,48 @@ func (d *AWSMachineCustomDefaulter) Default(ctx context.Context, obj *infrastruc
 		return err
 	}
 	pool, err := d.findPool(ctx, region, vpcID)
-	if err != nil || pool == nil {
+	if err != nil {
 		return err
+	}
+	additional, err := d.additionalInterfaceKeys(ctx, obj)
+	if err != nil {
+		return err
+	}
+	if pool == nil {
+		if len(additional) > 0 {
+			return fmt.Errorf("fixed ENI bundle requires a matching ENIPool")
+		}
+		return nil
 	}
 	interfaceKey, err := d.resolveInterfaceKey(ctx, obj)
 	if err != nil {
 		return err
+	}
+	if len(additional) > 0 {
+		ids, reserveErr := d.claimInterfaceSet(ctx, obj, pool, append([]string{interfaceKey}, additional...))
+		if reserveErr != nil {
+			return reserveErr
+		}
+		obj.Spec.NetworkInterfaces = ids
+		if annotations == nil {
+			annotations = map[string]string{}
+		}
+		annotations[networkingv1alpha1.AllocationResultAnnotation] = networkingv1alpha1.AllocationResultAllocated
+		if annotations[networkingv1alpha1.AttachAdditionalAnnotation] == allocationEnabled {
+			annotations[networkingv1alpha1.InterfaceSetAnnotation] = strings.Join(ids, ",")
+			obj.Spec.NetworkInterfaces = ids[:1]
+		}
+		obj.SetAnnotations(annotations)
+		return nil
 	}
 	claim, err := d.claimInterface(ctx, obj, pool, interfaceKey)
 	if err != nil {
 		return err
 	}
 	if claim == nil { // Dynamic exhaustion policy leaves CAPA networking untouched.
+		if pool.Spec.ExhaustionPolicy != "" && pool.Spec.ExhaustionPolicy != networkingv1alpha1.ExhaustionPolicyDynamic {
+			return fmt.Errorf("ENIPool %q has no available requested interface", pool.Name)
+		}
 		return nil
 	}
 	obj.Spec.NetworkInterfaces = []string{claim.Spec.ENIID}
@@ -118,8 +152,8 @@ func (d *AWSMachineCustomDefaulter) resolveClusterNetwork(ctx context.Context, o
 	if err := d.Client.Get(ctx, client.ObjectKey{Namespace: obj.Namespace, Name: clusterName}, cluster); err != nil {
 		return "", "", fmt.Errorf("get Cluster: %w", err)
 	}
-	if !cluster.Spec.InfrastructureRef.IsDefined() || cluster.Spec.InfrastructureRef.Kind != "AWSCluster" {
-		return "", "", fmt.Errorf("Cluster does not reference an AWSCluster")
+	if !cluster.Spec.InfrastructureRef.IsDefined() || cluster.Spec.InfrastructureRef.Kind != awsClusterKind {
+		return "", "", fmt.Errorf("cluster does not reference an AWSCluster")
 	}
 	awsCluster := &infrastructurev1beta2.AWSCluster{}
 	if err := d.Client.Get(ctx, client.ObjectKey{Namespace: obj.Namespace, Name: cluster.Spec.InfrastructureRef.Name}, awsCluster); err != nil {
@@ -151,7 +185,7 @@ func (d *AWSMachineCustomDefaulter) resolveInterfaceKey(ctx context.Context, obj
 	}
 	for _, owner := range obj.OwnerReferences {
 		ownerGroupVersion, err := schema.ParseGroupVersion(owner.APIVersion)
-		if err != nil || owner.Kind != "Machine" || ownerGroupVersion.Group != clusterv1.GroupVersion.Group {
+		if err != nil || owner.Kind != capiMachineKind || ownerGroupVersion.Group != clusterv1.GroupVersion.Group {
 			continue
 		}
 		machine := &clusterv1.Machine{}
@@ -176,13 +210,13 @@ func (d *AWSMachineCustomDefaulter) claimInterface(ctx context.Context, obj *inf
 			return nil, fmt.Errorf("ENIPool %q has no interface with key %q", pool.Name, interfaceKey)
 		}
 	}
-	sort.Slice(configured, func(i, j int) bool {
-		left, leftErr := netip.ParseAddr(configured[i].PrivateIP)
-		right, rightErr := netip.ParseAddr(configured[j].PrivateIP)
+	slices.SortFunc(configured, func(a, b networkingv1alpha1.ENIReference) int {
+		left, leftErr := netip.ParseAddr(a.PrivateIP)
+		right, rightErr := netip.ParseAddr(b.PrivateIP)
 		if leftErr != nil || rightErr != nil {
-			return configured[i].PrivateIP < configured[j].PrivateIP
+			return strings.Compare(a.PrivateIP, b.PrivateIP)
 		}
-		return left.Compare(right) < 0
+		return left.Compare(right)
 	})
 	for _, requested := range configured {
 		claim := &networkingv1alpha1.ENIClaim{
