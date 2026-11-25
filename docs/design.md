@@ -9,15 +9,17 @@ ENI를 사용하려 하므로 다중 replica 구성이 실패합니다.
 이 프로젝트는 생성된 각 `AWSMachine`에 Pool의 서로 다른 ENI를 할당하되,
 CAPA 리소스 생성 및 reconciliation 흐름을 유지합니다.
 
-최종 런타임 topology와 sequence는 [`operation-flow.md`](operation-flow.md)를
-참조하십시오.
+아래 설계는 기본 trust mode의 할당 계약입니다. 추가 ENI 연결 모드는
+AWS API 검사·연결을 포함하며, 현재 토폴로지와 시퀀스는
+[README](../README.md#동작-구조-및-토폴로지)에 있습니다.
+기본 할당 시퀀스는 [`operation-flow.md`](operation-flow.md)를 참조하십시오.
 
 ## 2. 설계 원칙
 
 1. 명시적으로 opt-in한 `AWSMachine`만 처리한다.
 2. 사용자는 Region, VPC ID, ENI ID와 기대하는 primary private IPv4만 선언한다.
 3. AZ와 subnet은 사용자 입력으로 받지 않는다.
-4. Webhook과 Controller 모두 AWS API를 호출하지 않는다.
+4. Webhook은 AWS API를 호출하지 않는다. 기본 trust mode의 Controller도 AWS API를 호출하지 않으며, 추가 연결 모드에서는 ENIClaim Controller가 AWS API를 사용한다.
 5. ENI 선택과 예약은 AWSMachine CREATE admission에서, 상태 갱신과 회수는
    Controller reconciliation에서 수행한다.
 6. Pool이 고갈되면 기본 정책상 CAPA의 동적 IP 할당으로 진행한다.
